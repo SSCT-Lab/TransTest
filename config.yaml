@@ -1,0 +1,11 @@
+repos:
+  tf: "framework/tensorflow-master"
+  pt: "framework/pytorch-main"
+test_roots:
+  tf: ["tensorflow/python", "tensorflow/**/tests"]
+  pt: ["test"]
+include_globs: ["**/*test.py", "**/test_*.py", "**/*_test.py"]
+exclude_globs: ["**/.venv/**", "**/_downloads/**"]
+runtime:
+  n_jobs: 8
+  cache_dir: ".cache"
