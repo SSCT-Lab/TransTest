@@ -1,6 +1,11 @@
 key.config
 /framework
-/outputs
+outputs/
 aliyun.key
 /.idea
 /data
+/migrated_tests
+/reports
+/models
+__pycache__/
+migrated_test_old/
