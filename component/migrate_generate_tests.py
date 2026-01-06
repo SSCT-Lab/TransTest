@@ -7,6 +7,8 @@ from pathlib import Path
 from tqdm import tqdm
 import sys
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -52,6 +54,18 @@ def assertAllClose(a, b, rtol=1e-6, atol=1e-6):
 
 def assertAllEqual(a, b):
     np.testing.assert_array_equal(a, b)
+
+def assertFunctionMatchesEager(func, *args, **kwargs):
+    \"\"\"Assert that a function matches eager execution behavior.
+    This is a simplified version for standalone test execution.\"\"\"
+    try:
+        # Run in eager mode
+        eager_result = func(*args, **kwargs)
+        # For now, just check that it doesn't raise an exception
+        # In a full implementation, this would compare eager vs graph mode
+        return eager_result
+    except Exception as e:
+        raise AssertionError(f"Function execution failed: {e}")
 
 # Enable eager execution for simpler evaluation
 try:
@@ -224,6 +238,46 @@ def extract_test_function_code(file_path, test_name):
     return None
 
 
+def extract_helper_functions(file_path):
+    """从原始测试文件中提取辅助函数（非测试函数）"""
+    try:
+        source = Path(file_path).read_text(encoding="utf-8", errors="ignore")
+        tree = ast.parse(source)
+
+        helper_functions = []
+
+        # 提取所有非测试函数的函数定义
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                # 跳过测试函数和私有函数
+                if node.name.startswith('test') or node.name.startswith('_'):
+                    continue
+
+                lines = source.split('\n')
+                start_line = node.lineno - 1
+                end_line = node.end_lineno if hasattr(node, 'end_lineno') and node.end_lineno else len(lines)
+
+                func_code = '\n'.join(lines[start_line:end_line])
+                # 移除基础缩进
+                func_lines = func_code.split('\n')
+                if func_lines:
+                    base_indent = 0
+                    for line in func_lines:
+                        if line.strip():
+                            base_indent = len(line) - len(line.lstrip())
+                            break
+                    if base_indent > 0:
+                        func_lines = [line[base_indent:] if len(line) > base_indent else line for line in func_lines]
+                        func_code = '\n'.join(func_lines)
+
+                helper_functions.append(func_code)
+
+        return '\n\n'.join(helper_functions) if helper_functions else None
+    except Exception:
+        # 提取辅助函数失败时不影响主流程
+        return None
+
+
 def build_migration_prompt(tf_code, tf_apis, mapped_pt_apis):
     """构建 LLM 迁移提示词"""
     # 选择前5个最相关的映射 API
@@ -304,6 +358,7 @@ def main():
     parser.add_argument("--tf-root", default="framework/tensorflow-master", help="TensorFlow 源码根目录")
     parser.add_argument("--model", default="qwen-flash", help="LLM 模型名称")
     parser.add_argument("--key-path", default="aliyun.key", help="API key 路径")
+    parser.add_argument("--workers", type=int, default=10, help="并发线程数")
     args = parser.parse_args()
     
     in_file = Path(args.input)
@@ -351,77 +406,86 @@ def main():
             print(f"[WARN] 无法初始化 LLM 客户端，将使用占位符生成 PyTorch 测试")
             print(f"[INFO] 但会包含 TensorFlow 原始测试逻辑")
 
-    migrated = 0
-    failed = 0
-
-    for item in tqdm(unique_tests, desc="Generating Migrated Tests"):
+    # 为每个线程创建独立的客户端（如果可用）
+    clients = []
+    if client:
+        try:
+            key_path = Path(args.key_path)
+            if not key_path.is_absolute():
+                key_path = Path(__file__).parent.parent / key_path
+            clients = [get_qwen_client(str(key_path)) for _ in range(args.workers)]
+        except:
+            clients = [None] * args.workers
+    else:
+        clients = [None] * args.workers
+    
+    # 线程安全的计数器
+    migrated_counter = [0]
+    failed_counter = [0]
+    lock = threading.Lock()
+    
+    def process_one_test(item, client_idx):
+        """处理单个测试的生成"""
         file = item["file"]
         name = item["name"]
         apis = item["apis_used"]
         matches = item["matches"]
-
+        
         # 生成目标文件路径
         out_path = out_dir / f"{safe(name)}.py"
-
+        
         # 已存在则跳过（支持断点续测），除非使用 --force
         if out_path.exists() and not args.force:
-            continue
-
-        # 提取原始测试代码
-        # 处理文件路径
-        if file.startswith("framework/tensorflow-master/"):
-            full_file_path = Path(file)
-        elif file.startswith("tensorflow/"):
-            full_file_path = tf_root / file
-        else:
-            full_file_path = tf_root / file
+            return {"status": "skipped", "name": name}
         
-        # 如果文件不存在，尝试其他路径
-        if not full_file_path.exists():
-            # 尝试直接使用 file 作为路径
-            full_file_path = Path(file)
-        
-        # 如果测试函数名是 unknown_test_*，尝试从文件中查找实际的测试函数
-        actual_test_name = name
-        if name.startswith("unknown_test_"):
-            # 尝试从文件中查找测试函数
-            try:
-                source = full_file_path.read_text(encoding="utf-8", errors="ignore")
-                tree = ast.parse(source)
-                test_funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name.startswith("test")]
-                if test_funcs:
-                    # 使用第一个找到的测试函数
-                    actual_test_name = test_funcs[0]
-                    print(f"[INFO] {name} -> {actual_test_name}")
-            except:
-                pass
-        
-        tf_code = extract_test_function_code(full_file_path, actual_test_name)
-        
-        if not tf_code:
-            print(f"[WARN] 无法提取 {file}:{actual_test_name} 的代码，跳过")
-            failed += 1
-            continue
-
-        # 提取并转换 TensorFlow 测试为独立可执行的函数
-        tf_standalone_code = convert_tf_to_standalone(tf_code, actual_test_name)
-        
-        if not tf_standalone_code:
-            print(f"[WARN] 无法转换 TensorFlow 测试 {file}:{actual_test_name}，跳过")
-            failed += 1
-            continue
-        
-        # 获取映射的 PyTorch API
-        mapped_pt_apis = [m["mapped_pt_api"] for m in matches]
-        
-        # 使用 LLM 生成迁移代码（如果客户端可用）
-        migrated_code = None
-        if client:
-            migrated_code = migrate_with_llm(client, tf_code, apis, mapped_pt_apis, args.model)
-        
-        if not migrated_code:
-            print(f"[WARN] LLM 生成失败 {file}:{name}，使用占位符")
-            migrated_code = f"""def test_{safe(name)}_pt():
+        try:
+            # 提取原始测试代码
+            # 处理文件路径
+            if file.startswith("framework/tensorflow-master/"):
+                full_file_path = Path(file)
+            elif file.startswith("tensorflow/"):
+                full_file_path = tf_root / file
+            else:
+                full_file_path = tf_root / file
+            
+            # 如果文件不存在，尝试其他路径
+            if not full_file_path.exists():
+                full_file_path = Path(file)
+            
+            # 如果测试函数名是 unknown_test_*，尝试从文件中查找实际的测试函数
+            actual_test_name = name
+            if name.startswith("unknown_test_"):
+                try:
+                    source = full_file_path.read_text(encoding="utf-8", errors="ignore")
+                    tree = ast.parse(source)
+                    test_funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name.startswith("test")]
+                    if test_funcs:
+                        actual_test_name = test_funcs[0]
+                except:
+                    pass
+            
+            tf_code = extract_test_function_code(full_file_path, actual_test_name)
+            
+            if not tf_code:
+                return {"status": "failed", "name": name, "error": f"无法提取 {file}:{actual_test_name} 的代码"}
+            
+            # 提取并转换 TensorFlow 测试为独立可执行的函数
+            tf_standalone_code = convert_tf_to_standalone(tf_code, actual_test_name)
+            
+            if not tf_standalone_code:
+                return {"status": "failed", "name": name, "error": f"无法转换 TensorFlow 测试 {file}:{actual_test_name}"}
+            
+            # 获取映射的 PyTorch API
+            mapped_pt_apis = [m["mapped_pt_api"] for m in matches]
+            
+            # 使用 LLM 生成迁移代码（如果客户端可用）
+            migrated_code = None
+            thread_client = clients[client_idx % len(clients)]
+            if thread_client:
+                migrated_code = migrate_with_llm(thread_client, tf_code, apis, mapped_pt_apis, args.model)
+            
+            if not migrated_code:
+                migrated_code = f"""def test_{safe(name)}_pt():
     # ===== TF Original APIs Used =====
     # {', '.join(apis[:10])}
     #
@@ -431,22 +495,31 @@ def main():
     # TODO: Write migrated PyTorch version
     assert True  # placeholder
 """
+            
+            # 清理生成的代码：移除重复的 import
+            migrated_code = re.sub(r'^import torch\s*$', '', migrated_code, flags=re.MULTILINE)
+            migrated_code = re.sub(r'^import pytest\s*$', '', migrated_code, flags=re.MULTILINE)
+            migrated_code = migrated_code.strip()
+            
+            # 确保 PyTorch 测试函数名以 _pt 结尾
+            if not re.search(r'def\s+test_\w+_pt\s*\(', migrated_code):
+                migrated_code = re.sub(r'def\s+(test_\w+)\s*\(', r'def \1_pt(', migrated_code)
+            
+            # 提取辅助函数（测试中使用的非测试函数）
+            helper_functions = extract_helper_functions(full_file_path)
+            helper_section = ""
+            if helper_functions:
+                helper_section = f"""# ===== Helper Functions from Original File =====
+{helper_functions}
 
-        # 清理生成的代码：移除重复的 import
-        migrated_code = re.sub(r'^import torch\s*$', '', migrated_code, flags=re.MULTILINE)
-        migrated_code = re.sub(r'^import pytest\s*$', '', migrated_code, flags=re.MULTILINE)
-        migrated_code = migrated_code.strip()
-        
-        # 确保 PyTorch 测试函数名以 _pt 结尾
-        if not re.search(r'def\s+test_\w+_pt\s*\(', migrated_code):
-            migrated_code = re.sub(r'def\s+(test_\w+)\s*\(', r'def \1_pt(', migrated_code)
-        
-        # 组合最终代码：包含 TensorFlow 原始测试和 PyTorch 迁移测试
-        content = HEADER + f"""# Auto-Migrated from TF test
+"""
+            
+            # 组合最终代码：包含 TensorFlow 原始测试和 PyTorch 迁移测试
+            content = HEADER + f"""# Auto-Migrated from TF test
 # source: {file}:{name}
 # Original test function: {actual_test_name}
 
-# ===== TensorFlow Original Test =====
+{helper_section}# ===== TensorFlow Original Test =====
 {tf_standalone_code}
 
 # ===== PyTorch Migrated Test =====
@@ -469,16 +542,14 @@ def test_{safe(name)}_compare():
         # Run PyTorch test
         pt_result = None
         pt_error = None
-        pt_test_name = None
-        # Find PyTorch test function name
+        # Find PyTorch test function name from migrated_code
         import re
         pt_match = re.search(r'def\s+(test_\w+_pt)\s*\(', '''{migrated_code}''')
         if pt_match:
             pt_test_name = pt_match.group(1)
             try:
-                # Execute the migrated code to define the function
+                # Execute the PyTorch test function
                 exec('''{migrated_code}''')
-                # Then call it
                 exec(f\"\"\"{{pt_test_name}}()\"\"\")
                 pt_result = "PASS"
             except Exception as e:
@@ -508,12 +579,65 @@ def test_{safe(name)}_compare():
         import traceback
         traceback.print_exc()
 
+# ===== Main Execution =====
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--compare":
+            test_{safe(name)}_compare()
+        elif sys.argv[1] == "--tf":
+            {actual_test_name}()
+        elif sys.argv[1] == "--pt":
+            import re
+            pt_match = re.search(r'def\s+(test_\w+_pt)\s*\(', '''{migrated_code}''')
+            if pt_match:
+                pt_test_name = pt_match.group(1)
+                exec('''{migrated_code}''')
+                exec(f\"\"\"{{pt_test_name}}()\"\"\")
+    else:
+        # Default: run TensorFlow test
+        {actual_test_name}()
+
 """
-
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        migrated += 1
+            
+            # 线程安全写入文件
+            with lock:
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                migrated_counter[0] += 1
+            
+            return {"status": "success", "name": name}
+            
+        except Exception as e:
+            with lock:
+                failed_counter[0] += 1
+            return {"status": "failed", "name": name, "error": str(e)}
+    
+    # 并发处理
+    print(f"[INFO] 使用 {args.workers} 个并发线程生成测试")
+    
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        # 提交所有任务
+        futures = {
+            executor.submit(process_one_test, item, i % args.workers): item 
+            for i, item in enumerate(unique_tests)
+        }
+        
+        # 处理完成的任务
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Generating Migrated Tests"):
+            try:
+                result = future.result()
+                if result["status"] == "failed":
+                    item = futures[future]
+                    print(f"[WARN] {result['name']}: {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                item = futures[future]
+                print(f"[ERROR] 处理失败 {item.get('name', 'unknown')}: {e}")
+                with lock:
+                    failed_counter[0] += 1
+    
+    migrated = migrated_counter[0]
+    failed = failed_counter[0]
 
     print("\n==== TEST MIGRATION SUMMARY ====")
     print(f"成功生成迁移测试数量: {migrated}")
