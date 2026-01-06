@@ -323,8 +323,8 @@ def migrate_with_llm(client, tf_code, tf_apis, mapped_pt_apis, model="qwen-flash
             # 新版本
             resp = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}],å
+                temperature=0,
                 max_tokens=2048
             )
             raw_code = resp.choices[0].message.content.strip()
