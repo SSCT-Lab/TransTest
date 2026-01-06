@@ -279,31 +279,36 @@ def extract_helper_functions(file_path):
 
 
 def build_migration_prompt(tf_code, tf_apis, mapped_pt_apis):
-    """构建 LLM 迁移提示词"""
+    """构建 LLM 迁移提示词（不再要求生成 compare 函数，只生成 PyTorch 侧逻辑）"""
     # 选择前5个最相关的映射 API
     top_mapped = mapped_pt_apis[:5] if len(mapped_pt_apis) > 5 else mapped_pt_apis
-    
-    prompt = f"""请将以下 TensorFlow 测试函数迁移为等价的 PyTorch 测试函数。
 
-要求：
-1. 保持测试逻辑和断言不变
-2. 将 TensorFlow API 替换为对应的 PyTorch API
-3. 使用 torch.allclose 代替 assertAllClose
-4. 使用标准的 pytest 测试格式（不使用 unittest.TestCase）
-5. 确保代码可以直接运行
+    prompt = f"""你是一个资深深度学习与单元测试迁移工程师。
+现在有一个 TensorFlow 测试函数，需要你**只迁移成 PyTorch 版本**，不需要生成任何 TF/PT 对比函数。
 
-TensorFlow 原始代码：
+【任务】
+1. 读取下面给出的 TensorFlow 测试代码，将其迁移为等价的 PyTorch 测试代码。
+2. 迁移后的代码中：
+   - 保持测试逻辑不变（输入、计算流程、关键断言语义保持一致）。
+   - 将 TensorFlow API 替换为对应的 PyTorch API（可参考下方给出的映射列表）。
+   - 可以使用 `assert` 或 `torch.allclose` 等方式校验结果。
+   - **不需要**再次调用 TensorFlow，也**不需要**写任何“TF/PT 结果对比”的辅助逻辑。
+3. 如果原始测试中有重要的中间结果，建议适当使用 `print(...)` 打印，方便人工查看（例如打印张量的形状或数值）。
+4. 最终请给出**可以直接运行的 PyTorch 测试函数代码**（可以是一个或多个 `def test_xxx_pt(...):`），
+   不要包含多余的解释性文字。
+
+【TensorFlow 原始测试代码】
 ```python
 {tf_code}
 ```
 
-使用的 TensorFlow API：
+【使用到的 TensorFlow API（最多 10 个，仅供参考）】
 {', '.join(tf_apis[:10])}
 
-映射的 PyTorch API 参考（前5个）：
+【可能对应的 PyTorch API（前 5 个，仅供参考）】
 {', '.join(top_mapped)}
 
-请只输出迁移后的 PyTorch 测试函数代码，不要输出其他解释。代码应该可以直接运行。
+请只输出迁移后的 **PyTorch 测试函数代码**，不要输出其他解释或说明。
 """
     return prompt
 

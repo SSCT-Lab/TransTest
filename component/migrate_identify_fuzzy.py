@@ -81,6 +81,26 @@ def main():
         # 若两个关键字段均缺失，则跳过
         if not used_apis:
             continue
+        
+        # 过滤掉 unknown_test_* 和非测试文件
+        # 这些通常是工具脚本、示例代码、测试数据生成脚本等，不是真正的测试
+        if test_name.startswith("unknown_test_"):
+            # 检查文件路径，如果是明显的非测试文件，跳过
+            skip_paths = [
+                "testing/op_tests/",  # 测试数据生成脚本
+                "examples/",  # 示例代码
+                "tools/",  # 工具脚本
+                "compiler/mlir/tensorflow/tests/tf_saved_model/",  # 编译器测试数据
+                "security/fuzzing/",  # 模糊测试
+                "lite/testing/op_tests/",  # Lite 测试数据
+                "lite/testing/",  # Lite 测试工具
+            ]
+            if any(skip_path in test_file for skip_path in skip_paths):
+                continue
+            # 如果文件路径包含这些关键词，也跳过
+            skip_keywords = ["_fuzz.py", "_util.py", "_utils.py", "_helper.py", "_test_util.py"]
+            if any(keyword in test_file for keyword in skip_keywords):
+                continue
 
         matched = []
 

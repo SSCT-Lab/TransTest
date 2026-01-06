@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from tqdm import tqdm
 from llm_utils import get_qwen_client
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 def load_jsonl(path):
     if not Path(path).exists(): return []
@@ -25,12 +27,30 @@ Signature: {pt_sig}
 def key_from(obj):
     return obj["tf_api"] + "@@" + obj["pt_api"]
 
+def process_one(client, c, model):
+    """处理单个候选对"""
+    prompt = PROMPT.format(**c)
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role":"user","content":prompt}]
+        )
+        raw = resp.choices[0].message.content.strip()
+        score = float(raw)
+    except Exception as e:
+        score = 0
+    
+    c["llm_score"] = score
+    c["final_score"] = 0.5*c["emb_sim"] + 0.5*score
+    return c
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cand", default="data/component_candidates.jsonl")
     parser.add_argument("--out", default="data/component_pairs.jsonl")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--model", default="qwen-flash")
+    parser.add_argument("--workers", type=int, default=10, help="并发线程数")
     args = parser.parse_args()
 
     candidates = load_jsonl(args.cand)
@@ -42,31 +62,50 @@ def main():
             done[key_from(x)] = True
         print(f"[resume] 已完成 {len(done)} 条")
 
-    client = get_qwen_client("aliyun.key")
+    # 过滤已完成的候选
+    todo = [c for c in candidates if key_from(c) not in done]
+    print(f"[INFO] 待处理: {len(todo)} 条，使用 {args.workers} 个并发线程")
+
+    if not todo:
+        print("[DONE] 所有候选已处理完成")
+        return
+
+    # 创建线程安全的文件写入
     fout = open(args.out, "a", encoding="utf-8")
+    lock = threading.Lock()
 
-    for c in tqdm(candidates):
-        k = key_from(c)
-        if k in done:
-            continue
+    def write_result(result):
+        with lock:
+            fout.write(json.dumps(result, ensure_ascii=False) + "\n")
+            fout.flush()
 
-        prompt = PROMPT.format(**c)
+    # 为每个线程创建独立的客户端
+    clients = [get_qwen_client("aliyun.key") for _ in range(args.workers)]
 
-        try:
-            resp = client.chat.completions.create(
-                model=args.model,
-                messages=[{"role":"user","content":prompt}]
-            )
-            raw = resp.choices[0].message.content.strip()
-            score = float(raw)
-        except:
-            score = 0
+    def process_with_client(candidate, client_idx):
+        client = clients[client_idx % len(clients)]
+        return process_one(client, candidate, args.model)
 
-        c["llm_score"] = score
-        c["final_score"] = 0.5*c["emb_sim"] + 0.5*score
-
-        fout.write(json.dumps(c, ensure_ascii=False) + "\n")
-        fout.flush()
+    # 并发处理
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        # 提交所有任务
+        futures = {
+            executor.submit(process_with_client, c, i % args.workers): c 
+            for i, c in enumerate(todo)
+        }
+        
+        # 处理完成的任务
+        for future in tqdm(as_completed(futures), total=len(futures), desc="Matching"):
+            try:
+                result = future.result()
+                write_result(result)
+            except Exception as e:
+                c = futures[future]
+                print(f"[ERROR] 处理失败 {key_from(c)}: {e}")
+                # 写入失败结果
+                c["llm_score"] = 0
+                c["final_score"] = 0.5 * c["emb_sim"]
+                write_result(c)
 
     fout.close()
     print(f"[DONE] wrote to {args.out}")
