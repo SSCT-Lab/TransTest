@@ -7,14 +7,14 @@ echo "=========================================="
 echo ""
 
 # 配置
-INPUT_FILE="data/migration_candidates_fuzzy.jsonl"
-OUTPUT_FILE="data/tf_test_results.jsonl"
+INPUT_FILE="data/migration/migration_candidates_fuzzy.jsonl"
+OUTPUT_FILE="data/results/tf_test_results.jsonl"
 TF_ROOT="framework/tensorflow-master"
 
 echo "[STEP 1] 检查输入文件..."
 if [ ! -f "$INPUT_FILE" ]; then
     echo "  [ERROR] 输入文件不存在: $INPUT_FILE"
-    echo "  请先运行: python3 component/migrate_identify_fuzzy.py"
+    echo "  请先运行: python3 component/migration/migrate_identify_fuzzy.py"
     exit 1
 fi
 
@@ -27,7 +27,7 @@ echo "  注意：这可能需要较长时间，请耐心等待..."
 echo ""
 
 # 执行收集脚本
-python3 component/migrate_collect_tf_results.py \
+python3 component/migration/migrate_collect_tf_results.py \
     --input "$INPUT_FILE" \
     --output "$OUTPUT_FILE" \
     --tf-root "$TF_ROOT"
@@ -38,7 +38,7 @@ if [ $? -eq 0 ]; then
     echo "  结果文件: $OUTPUT_FILE"
     echo ""
     echo "后续使用："
-    echo "  python3 component/migrate_compare.py --tf-results $OUTPUT_FILE"
+    echo "  python3 component/migration/migrate_compare.py --tf-results $OUTPUT_FILE"
 else
     echo ""
     echo "[ERROR] 收集失败，请检查错误信息"

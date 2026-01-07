@@ -63,24 +63,26 @@ def apply_api_mapping(tests, mapping):
     return tests
 
 if __name__ == "__main__":
-    tf_tests = [json.loads(line) for line in open("../data/tests_tf.parsed.jsonl")]
-    pt_tests = [json.loads(line) for line in open("../data/tests_pt.parsed.jsonl")]
+    Path("../data/parsing").mkdir(parents=True, exist_ok=True)
+    Path("../data/mapping").mkdir(parents=True, exist_ok=True)
+    
+    tf_tests = [json.loads(line) for line in open("../data/parsing/tests_tf.parsed.jsonl")]
+    pt_tests = [json.loads(line) for line in open("../data/parsing/tests_pt.parsed.jsonl")]
 
     mapping = build_api_map(tf_tests, pt_tests)
 
     # 保存映射表
-
-    with open("../data/api_map.json", "w") as f:
+    with open("../data/mapping/api_map.json", "w") as f:
         json.dump(mapping, f, indent=2)
 
     # 应用映射
     tf_mapped = apply_api_mapping(tf_tests, mapping)
     pt_mapped = apply_api_mapping(pt_tests, mapping)
 
-    with open("../data/tests_tf.mapped.jsonl", "w") as f:
+    with open("../data/mapping/tests_tf.mapped.jsonl", "w") as f:
         for t in tf_mapped:
             f.write(json.dumps(t) + "\n")
 
-    with open("../data/tests_pt.mapped.jsonl", "w") as f:
+    with open("../data/mapping/tests_pt.mapped.jsonl", "w") as f:
         for t in pt_mapped:
             f.write(json.dumps(t) + "\n")

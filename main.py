@@ -31,13 +31,14 @@ def run_pipeline(config):
 
         # Step 1: Discover
         files = discover_test_files(root_dirs, include, exclude)
-        with open(f"data/files_{repo_key}.jsonl", "w") as f:
+        Path("data/parsing").mkdir(parents=True, exist_ok=True)
+        with open(f"data/parsing/files_{repo_key}.jsonl", "w") as f:
             for item in files:
                 f.write(json.dumps(item) + "\n")
 
         # Step 2: Normalize
         normalized = [normalize_file(item) for item in files]
-        with open(f"data/norm_{repo_key}.jsonl", "w") as f:
+        with open(f"data/parsing/norm_{repo_key}.jsonl", "w") as f:
             for item in normalized:
                 f.write(json.dumps(item) + "\n")
 
@@ -49,7 +50,7 @@ def run_pipeline(config):
                 t["file"] = item["rel_path"]
                 results.append(t)
 
-        with open(f"data/tests_{repo_key}.parsed.jsonl", "w") as f:
+        with open(f"data/parsing/tests_{repo_key}.parsed.jsonl", "w") as f:
             for t in results:
                 f.write(json.dumps(t) + "\n")
 

@@ -159,7 +159,7 @@ def generate_report(comparison_file, output_file):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--comparison", default="data/migrate_comparison.jsonl", help="对比结果文件")
+    parser.add_argument("--comparison", default="data/results/migrate_comparison.jsonl", help="对比结果文件")
     parser.add_argument("--output", default="reports/migration_comparison.html", help="输出 HTML 报告文件")
     args = parser.parse_args()
     

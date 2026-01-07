@@ -24,9 +24,10 @@ def load_jsonl(path):
 
 def main():
     # 输入输出文件
-    in_file = Path("data/migration_candidates_fuzzy.jsonl")
-    out_file = Path("data/migration_candidates_fuzzy_fixed.jsonl")
-    tf_mapped_file = Path("data/tests_tf.mapped.jsonl")
+    Path("data/migration").mkdir(parents=True, exist_ok=True)
+    in_file = Path("data/migration/migration_candidates_fuzzy.jsonl")
+    out_file = Path("data/migration/migration_candidates_fuzzy_fixed.jsonl")
+    tf_mapped_file = Path("data/mapping/tests_tf.mapped.jsonl")
     
     if not in_file.exists():
         print(f"[ERROR] 输入文件不存在: {in_file}")

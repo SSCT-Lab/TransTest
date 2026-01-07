@@ -253,10 +253,11 @@ def main():
     parser = argparse.ArgumentParser(description="执行并对比 TensorFlow 和 PyTorch 测试")
     parser.add_argument("--migrated-dir", default="migrated_tests", help="迁移后的测试目录")
     parser.add_argument("--tf-root", default="framework/tensorflow-master", help="TensorFlow 源码根目录")
-    parser.add_argument("--out", default="data/migrate_comparison.jsonl", help="对比结果输出文件")
+    Path("data/results").mkdir(parents=True, exist_ok=True)
+    parser.add_argument("--out", default="data/results/migrate_comparison.jsonl", help="对比结果输出文件")
     parser.add_argument("--limit", type=int, default=-1, help="限制测试数量，-1 表示全部")
     parser.add_argument("--skip-tf", action="store_true", help="跳过 TensorFlow 测试执行（只运行 PyTorch）")
-    parser.add_argument("--tf-results", default="data/tf_test_results.jsonl", 
+    parser.add_argument("--tf-results", default="data/results/tf_test_results.jsonl", 
                        help="TensorFlow 测试结果静态文件（如果存在，直接读取而不执行）")
     args = parser.parse_args()
     
@@ -275,7 +276,7 @@ def main():
     print(f"[INFO] 找到 {len(test_files)} 个迁移的测试文件")
     
     # 加载 tests_tf.mapped.jsonl 用于查找真实的测试函数名
-    tests_tf_mapped_path = Path("data/tests_tf.mapped.jsonl")
+    tests_tf_mapped_path = Path("data/mapping/tests_tf.mapped.jsonl")
     tests_tf_mapped = None
     if tests_tf_mapped_path.exists():
         tests_tf_mapped = load_jsonl(tests_tf_mapped_path)
