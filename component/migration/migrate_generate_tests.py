@@ -365,12 +365,12 @@ def convert_tf_to_standalone(test_code, test_name):
     # 检查是否是类方法
     is_class_method = 'self' in test_code and 'def ' in test_code
     test_lines = test_code.split('\n')
-
+    
     if is_class_method:
         indented_body = _process_class_method_body(test_lines)
     else:
         indented_body = _process_standalone_function_body(test_lines)
-
+    
     # 生成 TF 侧独立函数代码，统一加 tf_ 前缀
     tf_func_name = f"tf_{test_name}"
     standalone_code = f"""def {tf_func_name}():
