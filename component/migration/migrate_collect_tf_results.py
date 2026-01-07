@@ -162,15 +162,16 @@ def run_tf_test_with_pytest(tf_file_path, test_name, tf_root, extracted_test_fil
 
 def main():
     parser = argparse.ArgumentParser(description="批量运行 TensorFlow 测试并保存结果到静态文件")
-    parser.add_argument("--input", default="data/migration_candidates_fuzzy.jsonl", 
+    Path("data/results").mkdir(parents=True, exist_ok=True)
+    parser.add_argument("--input", default="data/migration/migration_candidates_fuzzy.jsonl", 
                        help="输入文件（候选测试列表或 tests_tf.mapped.jsonl）")
     parser.add_argument("--tf-root", default="framework/tensorflow-master", 
                        help="TensorFlow 源码根目录")
-    parser.add_argument("--output", default="data/tf_test_results.jsonl", 
+    parser.add_argument("--output", default="data/results/tf_test_results.jsonl", 
                        help="输出结果文件")
     parser.add_argument("--limit", type=int, default=-1, 
                        help="限制测试数量，-1 表示全部")
-    parser.add_argument("--tests-tf-mapped", default="data/tests_tf.mapped.jsonl",
+    parser.add_argument("--tests-tf-mapped", default="data/mapping/tests_tf.mapped.jsonl",
                        help="测试元数据文件（用于查找真实测试函数名）")
     parser.add_argument("--from-tests-tf", action="store_true",
                        help="直接从 tests_tf.mapped.jsonl 读取所有测试（而不是从 candidates）")

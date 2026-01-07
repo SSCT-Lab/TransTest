@@ -7,8 +7,10 @@ import tempfile
 import os
 
 MIGRATED_DIR = Path("migrated_tests")
-OUT_FILE = Path("data/migrate_exec.jsonl")
-LOG_DIR = Path("data/migrate_logs")
+Path("data/results").mkdir(parents=True, exist_ok=True)
+Path("data/logs").mkdir(parents=True, exist_ok=True)
+OUT_FILE = Path("data/results/migrate_exec.jsonl")
+LOG_DIR = Path("data/logs")
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 
 

@@ -47,7 +47,8 @@ def process_one(client, c, model):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--cand", default="data/component_candidates.jsonl")
-    parser.add_argument("--out", default="data/component_pairs.jsonl")
+    Path("data/components").mkdir(parents=True, exist_ok=True)
+    parser.add_argument("--out", default="data/components/component_pairs.jsonl")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--model", default="qwen-flash")
     parser.add_argument("--workers", type=int, default=10, help="并发线程数")

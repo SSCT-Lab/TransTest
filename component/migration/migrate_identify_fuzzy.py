@@ -51,9 +51,10 @@ def fuzzy_match(tf_api, mapped_api, th=0.4):
 # Main
 # -------------------------------
 def main():
-    f_pairs = Path("data/component_pairs.jsonl")
-    f_test_usage = Path("data/tests_tf.mapped.jsonl")
-    out_file = Path("data/migration_candidates_fuzzy.jsonl")
+    f_pairs = Path("data/components/component_pairs.jsonl")
+    f_test_usage = Path("data/mapping/tests_tf.mapped.jsonl")
+    Path("data/migration").mkdir(parents=True, exist_ok=True)
+    out_file = Path("data/migration/migration_candidates_fuzzy.jsonl")
 
     pairs = load_jsonl(f_pairs)
     print(f"[LOAD] API pairs = {len(pairs)}")

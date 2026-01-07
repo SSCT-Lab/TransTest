@@ -25,12 +25,12 @@ python3 component/migrate_compare.py \
     --migrated-dir migrated_tests \
     --limit 50 \
     --skip-tf \
-    --out data/migrate_exec.jsonl
+    --out data/results/migrate_exec.jsonl
 
 # 步骤 3: 查看统计
 python3 -c "
 import json
-results = [json.loads(l) for l in open('data/migrate_exec.jsonl')]
+results = [json.loads(l) for l in open('data/results/migrate_exec.jsonl')]
 total = len(results)
 passed = sum(1 for r in results if (r.get('pt_result') or {}).get('status') == 'pass')
 failed = sum(1 for r in results if (r.get('pt_result') or {}).get('status') == 'fail')
@@ -59,14 +59,14 @@ python3 component/migrate_generate_tests.py --limit 100 --force
 python3 component/migrate_compare.py \
     --migrated-dir migrated_tests \
     --skip-tf \
-    --out data/migrate_exec.jsonl
+    --out data/results/migrate_exec.jsonl
 ```
 
 ## 查看结果
 
 ```bash
 # 查看执行结果
-cat data/migrate_exec.jsonl | python3 -m json.tool | head -50
+cat data/results/migrate_exec.jsonl | python3 -m json.tool | head -50
 
 # 查看报告
 open reports/migration_comparison.html  # macOS
