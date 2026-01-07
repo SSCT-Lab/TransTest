@@ -1,6 +1,7 @@
 # ./component/doc_crawler_pytorch.py
 """PyTorch 文档爬取器"""
 import re
+from typing import Dict
 from bs4 import BeautifulSoup
 from component.doc.doc_crawler_base import DocCrawler
 
@@ -14,17 +15,15 @@ class PyTorchDocCrawler(DocCrawler):
         super().__init__("pytorch")
     
     def build_doc_url(self, api_name: str) -> str:
-        """构建 PyTorch 文档 URL"""
-        api_parts = api_name.split('.')
-        
-        if len(api_parts) == 1:
-            # 简单函数名，尝试直接访问
-            return f"{PT_DOC_BASE}torch.html#{api_name}"
-        else:
-            # 模块.函数名格式
-            module = api_parts[0]
-            func_name = '.'.join(api_parts[1:])
-            return f"{PT_DOC_BASE}{module}.html#{module}.{func_name}"
+        """构建 PyTorch 文档 URL（优先使用 generated 页面）.
+
+        典型示例:
+        - torch.nn.Conv2d -> https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
+        - torch.add        -> https://pytorch.org/docs/stable/generated/torch.add.html
+        """
+        api_name = api_name.lstrip(".")
+        # 使用官方推荐的 generated 路径
+        return f"{PT_DOC_BASE}generated/{api_name}.html"
     
     def parse_doc_content(self, soup: BeautifulSoup, api_name: str, url: str) -> Dict:
         """解析 PyTorch 文档内容"""

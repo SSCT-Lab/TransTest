@@ -25,7 +25,15 @@ MAX_MAPPED_APIS = 5
 
 # 尝试导入 LLM 客户端 - 使用与 semantic_llm.py 相同的方式
 def load_api_key(path="aliyun.key"):
-    with open(path) as f:
+    """加载 API key，支持相对路径和绝对路径"""
+    key_path = Path(path)
+    if not key_path.is_absolute():
+        # 如果是相对路径，尝试从项目根目录查找
+        # __file__ 是 component/migration/migrate_generate_tests.py
+        # parent.parent.parent 就是项目根目录
+        project_root = Path(__file__).parent.parent.parent
+        key_path = project_root / key_path
+    with open(key_path) as f:
         return f.read().strip()
 
 def get_qwen_client(key_path="aliyun.key"):
@@ -225,23 +233,63 @@ def find_actual_test_name(file_path, test_name):
 
 
 def _normalize_indent(lines, base_indent):
-    """规范化代码行的缩进"""
-    normalized = []
+    """规范化代码行的缩进，保持相对缩进关系
+    
+    参数:
+        lines: 代码行列表（已移除基础缩进）
+        base_indent: 基础缩进级别（已移除）
+    
+    返回:
+        规范化后的代码行列表，每行都有正确的缩进（8个空格基础 + 相对缩进）
+    """
+    if not lines:
+        return []
+    
+    if base_indent is None:
+        base_indent = 0
+    
+    # 找到第一行非空行的缩进作为参考
+    first_indent = None
     for line in lines:
         if line.strip():
-            if base_indent and len(line) > base_indent:
-                line = line[base_indent:]
-            if not line.startswith(' ') and not line.startswith('\t'):
-                normalized.append('        ' + line)
-            else:
-                normalized.append('        ' + line.lstrip())
-        else:
+            first_indent = len(line) - len(line.lstrip())
+            break
+    
+    if first_indent is None:
+        # 全部是空行
+        return [''] * len(lines)
+    
+    normalized = []
+    for line in lines:
+        if not line.strip():
+            # 空行保持为空
             normalized.append('')
+            continue
+        
+        # 计算当前行的缩进（相对于已移除基础缩进后的代码）
+        current_indent = len(line) - len(line.lstrip())
+        
+        # 计算相对于第一行的缩进级别
+        relative_indent = current_indent - first_indent
+        relative_indent = max(0, relative_indent)  # 确保非负
+        
+        # 生成目标缩进（8个空格基础 + 相对缩进）
+        # 将相对缩进转换为4的倍数（向下取整）
+        indent_levels = relative_indent // 4
+        target_indent = '        ' + ('    ' * indent_levels)
+        
+        # 如果相对缩进不是4的倍数，需要额外处理
+        extra_spaces = relative_indent % 4
+        if extra_spaces > 0:
+            target_indent += ' ' * extra_spaces
+        
+        normalized.append(target_indent + line.lstrip())
+    
     return normalized
 
 
 def _process_class_method_body(test_lines):
-    """处理类方法体，移除 self 引用并转换测试框架方法"""
+    """处理类方法体，移除 self 引用并转换测试框架方法，保持缩进结构"""
     test_body = []
     in_def = False
     base_indent = None
@@ -253,11 +301,15 @@ def _process_class_method_body(test_lines):
             base_indent = len(line) - len(line.lstrip())
             continue
         if in_def:
+            # 保留空行以维持缩进结构
             if not stripped:
+                test_body.append('')
                 continue
-            # 移除基础缩进
+            
+            # 移除基础缩进，但保持相对缩进
             if base_indent and len(line) > base_indent:
                 line = line[base_indent:]
+            
             # 简化 self. 调用
             line = re.sub(r'\bself\.', '', line)
             # 处理测试框架方法
@@ -269,13 +321,14 @@ def _process_class_method_body(test_lines):
             # 处理 .eval() 调用
             if '.eval()' in line and 'Session()' not in line:
                 line = line.replace('.eval()', '.numpy()')
+            
             test_body.append(line)
     
-    return _normalize_indent(test_body, 0)
+    return _normalize_indent(test_body, base_indent)
 
 
 def _process_standalone_function_body(func_lines):
-    """处理独立函数体"""
+    """处理独立函数体，保持缩进结构"""
     func_body = []
     in_def = False
     base_indent = None
@@ -287,26 +340,40 @@ def _process_standalone_function_body(func_lines):
             base_indent = len(line) - len(line.lstrip())
             continue
         if in_def:
+            # 保留空行以维持缩进结构
+            if not stripped:
+                func_body.append('')
+                continue
+            
+            # 移除基础缩进，但保持相对缩进
             if base_indent and len(line) > base_indent:
                 line = line[base_indent:]
+            
             func_body.append(line)
     
-    return _normalize_indent(func_body, 0)
+    return _normalize_indent(func_body, base_indent)
 
 
 def convert_tf_to_standalone(test_code, test_name):
-    """将 TensorFlow 测试代码转换为独立可执行的函数"""
+    """将 TensorFlow 测试代码转换为独立可执行的函数
+
+    注意：
+    - 为了避免 pytest 把原始 TF 测试当成用例收集，这里统一给 TF 函数加前缀 tf_。
+      例如原始测试名为 test_basic，则生成的函数名为 tf_test_basic。
+    - 这样文件里只会有一个真正的 pytest 用例：PyTorch 侧的 test_xxx_pt。
+    """
     # 检查是否是类方法
     is_class_method = 'self' in test_code and 'def ' in test_code
     test_lines = test_code.split('\n')
-    
+
     if is_class_method:
         indented_body = _process_class_method_body(test_lines)
     else:
         indented_body = _process_standalone_function_body(test_lines)
-    
-    # 生成独立函数代码
-    standalone_code = f"""def {test_name}():
+
+    # 生成 TF 侧独立函数代码，统一加 tf_ 前缀
+    tf_func_name = f"tf_{test_name}"
+    standalone_code = f"""def {tf_func_name}():
     \"\"\"Original TensorFlow test logic\"\"\"
     try:
 {chr(10).join(indented_body)}
@@ -316,7 +383,8 @@ def convert_tf_to_standalone(test_code, test_name):
         import traceback
         traceback.print_exc()
 """
-    return standalone_code
+    # 返回代码和实际函数名，方便后续 main 中调用
+    return standalone_code, tf_func_name
 
 
 def _find_function_end_line(node, tree, lines):
@@ -503,28 +571,24 @@ def migrate_with_llm(client, tf_code, tf_apis, mapped_pt_apis, model=DEFAULT_MOD
 
 def initialize_llm_clients(key_path, workers):
     """初始化 LLM 客户端列表"""
-    # 解析 key 路径
-    key_path_obj = Path(key_path)
-    if not key_path_obj.is_absolute():
-        key_path_obj = Path(__file__).parent.parent / key_path
-    
+    # 解析 key 路径（load_api_key 内部会处理相对路径）
     # 尝试初始化主客户端
     try:
-        client = get_qwen_client(str(key_path_obj))
+        client = get_qwen_client(key_path)
     except Exception as e:
         print(f"[WARN] 无法初始化 LLM 客户端: {e}")
         print(f"[INFO] 尝试使用默认路径...")
         try:
             client = get_qwen_client(DEFAULT_KEY_PATH)
-        except Exception:
-            print(f"[WARN] 无法初始化 LLM 客户端，将使用占位符生成 PyTorch 测试")
+        except Exception as e2:
+            print(f"[WARN] 无法初始化 LLM 客户端，将使用占位符生成 PyTorch 测试: {e2}")
             print(f"[INFO] 但会包含 TensorFlow 原始测试逻辑")
             client = None
     
     # 为每个线程创建独立的客户端
     if client:
         try:
-            return [get_qwen_client(str(key_path_obj)) for _ in range(workers)]
+            return [get_qwen_client(key_path) for _ in range(workers)]
         except Exception:
             return [None] * workers
     return [None] * workers
