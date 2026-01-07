@@ -47,15 +47,13 @@ class DocCrawler(ABC):
             json.dump(doc_content, f, ensure_ascii=False, indent=2)
     
     def normalize_api_name(self, api_name: str) -> str:
-        """规范化 API 名称（子类可以重写）"""
-        # 移除常见前缀
-        prefixes = [f'{self.framework_name}.', 'tf.', 'torch.', 'pt.', 'paddle.', 'ms.']
-        for prefix in prefixes:
-            api_name = api_name.replace(prefix, '')
-        # 移除版本后缀
+        """规范化 API 名称（尽量保持原始路径，只剥掉版本后缀）"""
         import re
-        api_name = re.sub(r'_v\d+$', '', api_name)
-        return api_name.strip()
+        # 去掉首尾空白
+        api_name = api_name.strip()
+        # 仅移除结尾的 `_vX` 版本后缀，例如：conv2d_v2 -> conv2d
+        api_name = re.sub(r"_v\d+$", "", api_name)
+        return api_name
     
     def fetch_url(self, url: str) -> Optional[requests.Response]:
         """获取 URL 内容（带延迟和错误处理）"""

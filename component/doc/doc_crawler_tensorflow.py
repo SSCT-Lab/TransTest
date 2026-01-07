@@ -1,6 +1,7 @@
 # ./component/doc_crawler_tensorflow.py
 """TensorFlow 文档爬取器"""
 import re
+from typing import Dict
 from bs4 import BeautifulSoup
 from component.doc.doc_crawler_base import DocCrawler
 

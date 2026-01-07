@@ -22,57 +22,91 @@ def build_analysis_prompt(
     pt_code: str,
     tf_docs: List[str],
     pt_docs: List[str],
-    context: Optional[str] = None
+    tf_output: Optional[str] = None,
+    pt_output: Optional[str] = None,
+    context: Optional[str] = None,
 ) -> str:
-    """构建分析提示词"""
+    """构建分析提示词（结构化为：任务描述 / TF 信息 / PT 信息 / 评估要求）"""
     
     tf_docs_text = "\n\n".join(tf_docs) if tf_docs else "未找到相关 TensorFlow 文档"
     pt_docs_text = "\n\n".join(pt_docs) if pt_docs else "未找到相关 PyTorch 文档"
     
     prompt = f"""你是一个资深的深度学习框架专家，擅长分析 TensorFlow 和 PyTorch 之间的差异。
 
-【任务】
-分析以下测试迁移中的问题，判断该差异或异常是否正常。
+【任务描述】
+我们有一组从 TensorFlow 迁移到 PyTorch 的单元测试，请你根据给出的代码、输入/输出信息以及官方文档，
+判断当前的异常或行为差异是否“正常”（例如框架行为本身不同、数值精度差异、边界行为定义不同），
+还是因为迁移实现本身存在问题。
 
-【错误信息】
+【整体错误信息 / 元信息】
+下面是本次 case 对应的总体状态与对比元信息（精简后的摘要）：
 {error_message}
 
-【TensorFlow 原始代码】
+----------------------------------------
+【TensorFlow 测试信息】
+
+1. 代码（TF 侧测试逻辑）：
 ```python
 {tf_code}
 ```
 
-【PyTorch 迁移代码】
+2. 典型输入 / 使用方式（如果能从代码或文档中推断，请你在分析中明确说明）：
+- 根据上面的 TF 代码和文档，总结该测试大致使用了什么输入（形状、数据类型、数值范围等）。
+
+3. 官方文档（TensorFlow）：
+{tf_docs_text}
+
+4. 实际输出 / 行为（TensorFlow）：
+```text
+{tf_output or "（未提供 TF 执行日志，请根据代码和文档自行推断期望行为）"}
+```
+
+----------------------------------------
+【PyTorch 测试信息】
+
+1. 代码（迁移后的 PT 测试逻辑）：
 ```python
 {pt_code}
 ```
 
-【TensorFlow 官方文档】
-{tf_docs_text}
+2. 典型输入 / 使用方式：
+- 根据上面的 PyTorch 代码和文档，总结该测试在 PyTorch 中使用了什么输入（形状、数据类型、数值范围等），
+  并说明是否与 TensorFlow 侧保持一致。
 
-【PyTorch 官方文档】
+3. 官方文档（PyTorch）：
 {pt_docs_text}
+
+4. 实际输出 / 行为（PyTorch）：
+```text
+{pt_output or "（未提供 PT 执行日志，请根据代码和文档自行推断行为）"}
+```
 """
     
     if context:
         prompt += f"""
+----------------------------------------
 【额外上下文】
 {context}
 """
     
     prompt += """
-【分析要求】
-1. 仔细阅读错误信息和代码
-2. 参考官方文档，理解两个框架的 API 差异
-3. 判断该错误是否是由于框架差异导致的正常现象
-4. 如果是正常差异，说明原因和解决方案
-5. 如果是迁移错误，指出问题所在
+----------------------------------------
+【评估要求】
+请你基于以上信息进行严谨的技术评估，并回答下面几个问题：
 
-请给出详细的分析结果，包括：
-- 错误原因分析
-- 是否为正常差异
-- 如果是正常差异，说明两个框架的差异点
-- 建议的修复方案（如果需要）
+1. 行为是否正常：
+   - 当前 TF 与 PT 的差异（或者 PT 的异常）是否可以视为“正常的框架行为差异”（例如 API 语义差异、默认参数不同等）？
+   - 如果是“正常差异”，请清楚说明差异点、引用相应文档段落（用自然语言概述即可），并说明是否需要在测试中显式容忍这种差异。
+
+2. 是否存在迁移错误：
+   - 如果你认为是迁移实现本身有问题（例如输入构造不一致、维度/dtype 错误、断言写法不当），
+     请指出具体问题位置（引用关键代码片段即可），并说明正确的迁移方式应该是什么。
+
+3. 结论标签（请在答案中明确写出）：
+   - 用一句话给出整体判断，例如：
+     - 「结论：正常差异，无需修改实现，只需在对比/报告中解释原因」
+     - 「结论：迁移实现有问题，需要修改 PyTorch 侧代码」
+     - 「结论：信息不足，无法判断，需要补充更多日志或文档」
 """
     
     return prompt
@@ -85,8 +119,10 @@ def analyze_with_llm(
     pt_code: str,
     tf_apis: List[str],
     pt_apis: List[str],
+    tf_output: Optional[str] = None,
+    pt_output: Optional[str] = None,
     context: Optional[str] = None,
-    model: str = DEFAULT_MODEL
+    model: str = DEFAULT_MODEL,
 ) -> Optional[str]:
     """使用 LLM 分析问题"""
     
@@ -113,9 +149,16 @@ def analyze_with_llm(
     
     print(f"[INFO] 已获取 {len(tf_docs)} 个 TF 文档，{len(pt_docs)} 个 PT 文档")
     
-    # 构建提示词
+    # 构建提示词（TF / PT 输出分开给进去）
     prompt = build_analysis_prompt(
-        error_message, tf_code, pt_code, tf_docs, pt_docs, context
+        error_message=error_message,
+        tf_code=tf_code,
+        pt_code=pt_code,
+        tf_docs=tf_docs,
+        pt_docs=pt_docs,
+        tf_output=tf_output,
+        pt_output=pt_output,
+        context=context,
     )
     
     # 调用 LLM
@@ -150,7 +193,9 @@ def analyze_test_error(
     test_file: str,
     tf_apis: Optional[List[str]] = None,
     pt_apis: Optional[List[str]] = None,
-    context: Optional[str] = None
+    tf_output: Optional[str] = None,
+    pt_output: Optional[str] = None,
+    context: Optional[str] = None,
 ) -> Optional[str]:
     """分析测试错误"""
     
@@ -188,9 +233,17 @@ def analyze_test_error(
         print(f"[ERROR] 无法初始化 LLM 客户端: {e}")
         return None
     
-    # 调用分析
+    # 调用分析（带上 TF / PT 输出片段）
     return analyze_with_llm(
-        client, error_message, tf_code, pt_code, tf_apis, pt_apis, context
+        client=client,
+        error_message=error_message,
+        tf_code=tf_code,
+        pt_code=pt_code,
+        tf_apis=tf_apis,
+        pt_apis=pt_apis,
+        tf_output=tf_output,
+        pt_output=pt_output,
+        context=context,
     )
 
 
