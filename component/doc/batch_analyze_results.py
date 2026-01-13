@@ -31,6 +31,7 @@ from typing import Dict, Iterable, Optional, List
 from tqdm import tqdm
 
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -175,6 +176,12 @@ def main() -> None:
         action="store_true",
         help="只分析 TF/PT 结果不匹配的 case",
     )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="并发分析的线程数（默认 4，注意不要开太大以免触发 LLM 速率限制）",
+    )
     args = ap.parse_args()
 
     results_path = Path(args.results)
@@ -199,37 +206,47 @@ def main() -> None:
     print(f"[INFO] 选中 {len(cases)} 条需要分析的 case")
 
     analyses: List[Dict] = []
-
+    
+    # 并发分析：每个 case 单独调用 analyze_test_error（内部会使用本地文档缓存）
+    def process_case(idx_and_rec):
+        idx, rec = idx_and_rec
+        pt_file: str = rec.get("pt_file") or rec.get("file") or ""
+        test_name: str = rec.get("test_name") or ""
+        
+        err = build_error_message(rec)
+        error_msg = err["summary"]
+        
+        analysis_text: Optional[str] = analyze_test_error(
+            error_message=error_msg,
+            test_file=pt_file,
+            tf_apis=None,
+            pt_apis=None,
+            tf_output=err.get("tf_output"),
+            pt_output=err.get("pt_output"),
+            context=None,
+        )
+        
+        analysis_rec = {
+            "pt_file": pt_file,
+            "test_name": test_name,
+            "tf_status": (rec.get("tf_result") or {}).get("status"),
+            "pt_status": (rec.get("pt_result") or {}).get("status"),
+            "comparison": rec.get("comparison"),
+            "analysis": analysis_text or "",
+        }
+        return idx, analysis_rec
+    
     with out_json.open("w", encoding="utf-8") as fj:
-        for rec in tqdm(cases, desc="Analyzing with docs + LLM"):
-            pt_file: str = rec.get("pt_file") or rec.get("file") or ""
-            test_name: str = rec.get("test_name") or ""
-
-            err = build_error_message(rec)
-            error_msg = err["summary"]
-
-            # 调用现有的单条分析逻辑（将 TF / PT 输出分开传入）
-            analysis_text: Optional[str] = analyze_test_error(
-                error_message=error_msg,
-                test_file=pt_file,
-                tf_apis=None,
-                pt_apis=None,
-                tf_output=err.get("tf_output"),
-                pt_output=err.get("pt_output"),
-                context=None,
-            )
-
-            analysis_rec = {
-                "pt_file": pt_file,
-                "test_name": test_name,
-                "tf_status": (rec.get("tf_result") or {}).get("status"),
-                "pt_status": (rec.get("pt_result") or {}).get("status"),
-                "comparison": rec.get("comparison"),
-                "analysis": analysis_text or "",
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {
+                executor.submit(process_case, (idx, rec)): idx
+                for idx, rec in enumerate(cases)
             }
-            analyses.append(analysis_rec)
-            fj.write(json.dumps(analysis_rec, ensure_ascii=False) + "\n")
-            fj.flush()
+            for fut in tqdm(as_completed(futures), total=len(futures), desc="Analyzing with docs + LLM"):
+                idx, analysis_rec = fut.result()
+                analyses.append(analysis_rec)
+                fj.write(json.dumps(analysis_rec, ensure_ascii=False) + "\n")
+                fj.flush()
 
     # 汇总为 Markdown 报告
     lines: List[str] = []
