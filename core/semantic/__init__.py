@@ -1,2 +1,0 @@
-# Semantic analysis components
-

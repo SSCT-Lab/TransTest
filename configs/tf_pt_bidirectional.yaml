@@ -1,0 +1,45 @@
+project:
+  name: CoSMiT
+  artifact_schema_version: "1.0"
+
+frameworks:
+  tensorflow:
+    repository: ../frameworks/tensorflow
+    component_catalog: ../examples/tf_pt_bidirectional/catalogs/tensorflow_components.jsonl
+  pytorch:
+    repository: ../frameworks/pytorch
+    component_catalog: ../examples/tf_pt_bidirectional/catalogs/pytorch_components.jsonl
+
+directions:
+  - source: tensorflow
+    target: pytorch
+  - source: pytorch
+    target: tensorflow
+
+inputs:
+  api_mappings: ../examples/tf_pt_bidirectional/api_mappings.yaml
+
+pipeline:
+  artifacts_dir: ../artifacts
+  critical_components_per_direction: 2
+  top_k_similar_components: 1
+  max_repair_rounds: 2
+
+validation:
+  dynamic: true
+  timeout_seconds: 30
+
+criticality_weights:
+  usage_frequency: 0.20
+  test_weakness: 0.25
+  change_activity: 0.15
+  defect_sensitivity: 0.20
+  impact_scope: 0.20
+
+similarity_weights:
+  name: 0.10
+  documentation: 0.20
+  parameters: 0.20
+  source_code: 0.15
+  call_context: 0.15
+  test_behavior: 0.20

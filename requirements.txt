@@ -1,5 +1,0 @@
-requests
-torch
-numpy
-unittest2
-tensorflow

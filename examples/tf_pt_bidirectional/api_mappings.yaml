@@ -1,0 +1,47 @@
+api_mappings:
+  - source: tensorflow
+    target: pytorch
+    source_api: tensorflow.nn.relu
+    target_api: torch.relu
+  - source: tensorflow
+    target: pytorch
+    source_api: tensorflow.math.reduce_sum
+    target_api: torch.sum
+    parameter_map:
+      axis: dim
+      keepdims: keepdim
+  - source: tensorflow
+    target: pytorch
+    source_api: tensorflow.constant
+    target_api: torch.tensor
+  - source: tensorflow
+    target: pytorch
+    source_api: tensorflow.debugging.assert_near
+    target_api: torch.testing.assert_close
+  - source: tensorflow
+    target: pytorch
+    source_api: tensorflow.float32
+    target_api: torch.float32
+  - source: pytorch
+    target: tensorflow
+    source_api: torch.relu
+    target_api: tensorflow.nn.relu
+  - source: pytorch
+    target: tensorflow
+    source_api: torch.sum
+    target_api: tensorflow.math.reduce_sum
+    parameter_map:
+      dim: axis
+      keepdim: keepdims
+  - source: pytorch
+    target: tensorflow
+    source_api: torch.tensor
+    target_api: tensorflow.constant
+  - source: pytorch
+    target: tensorflow
+    source_api: torch.testing.assert_close
+    target_api: tensorflow.debugging.assert_near
+  - source: pytorch
+    target: tensorflow
+    source_api: torch.float32
+    target_api: tensorflow.float32
